@@ -778,7 +778,10 @@ static int ipl_proc_clock_test(void) {
     if (!ipl_is_functional(proc))
       continue;
 
-    ipl_log(IPL_INFO, "Running p10_clock_test HWP on processor %d\n",
+    if (!ipl_is_master_proc(proc))
+      continue;
+
+    ipl_log(IPL_INFO, "Running p10_clock_test HWP on master processor %d\n",
             pdbg_target_index(proc));
     fapirc = p10_clock_test(proc);
     if (fapirc != fapi2::FAPI2_RC_SUCCESS) {
