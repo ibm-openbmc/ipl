@@ -38,6 +38,7 @@ enum ipl_error_type {
 	IPL_ERR_CLK,
 	IPL_ERR_INVALID_NUM_CLOCK,
 	IPL_ERR_ATTR_WRITE,
+	IPL_ERR_GUARD_PARTITION_ACCESS, 
 };
 
 typedef std::map<ipl_error_type, const char*> err_msg_map_type;
@@ -55,6 +56,7 @@ const err_msg_map_type err_msg_map = {
 	{ IPL_ERR_CLK, "Clock hw initialization is failed" },
 	{ IPL_ERR_INVALID_NUM_CLOCK, "Invalid number of clock targets found" },
 	{ IPL_ERR_ATTR_WRITE, "Device tree attribute write failed" },
+	{ IPL_ERR_GUARD_PARTITION_ACCESS, "Guard partition access failure"},
 };
 
 // Error info structure.
