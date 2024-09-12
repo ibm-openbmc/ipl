@@ -97,8 +97,8 @@ class SbeError final : public phalError
 {
        public:
 	SbeError(ERR_TYPE type, int fd, const fs::path fileName);
-	SbeError(ERR_TYPE type) : type(type){};
-	SbeError() : type(NONE){};
+	SbeError(ERR_TYPE type) : type(type) {};
+	SbeError() : type(NONE) {};
 	SbeError(ERR_TYPE type, const FFDCFileList &fileList) :
 	    type(type), ffdcFileList(fileList)
 	{
@@ -206,13 +206,13 @@ class DumpError final : public phalError
 class PdbgError final : public phalError
 {
        public:
-	PdbgError(ERR_TYPE type) : type(type){};
-	PdbgError() : type(NONE){};
+	PdbgError(ERR_TYPE type) : type(type) {};
+	PdbgError() : type(NONE) {};
 
 	PdbgError &operator=(PdbgError &&) = default;
 	PdbgError(PdbgError &&) = default;
 
-	virtual ~PdbgError(){};
+	virtual ~PdbgError() {};
 
 	/* return error type */
 	ERR_TYPE errType() const noexcept override
