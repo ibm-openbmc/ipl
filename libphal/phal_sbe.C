@@ -49,10 +49,11 @@ void logSbeDebugData(struct pdbg_target *proc)
  *
  * Exceptions: SbeError/PdbgError with failure reason code
  */
-void sbeHaltStateRecovery(struct pdbg_target *proc)
+void sbeHaltStateRecovery(struct pdbg_target *proc,
+			  bool ignorePrimaryProc = true)
 {
 	// Skip for primary processor.
-	if (isPrimaryProc(proc)) {
+	if (ignorePrimaryProc && isPrimaryProc(proc)) {
 		return;
 	}
 	// Required to probe processor associated fsi to run hardware procedures
@@ -88,7 +89,6 @@ void sbeHaltStateRecovery(struct pdbg_target *proc)
 		// No special actions required
 		return;
 	}
-
 	log(level::INFO, "SBE(%s) HRESET Requested", pdbg_target_path(proc));
 
 	// update SBE state to CHECK_CFAM.
@@ -305,7 +305,7 @@ void getTiInfo(struct pdbg_target *proc, uint8_t **data, uint32_t *dataLen)
 		    pdbg_target_path(proc));
 	}
 	// SBE halt state need recovery before dump chip-ops
-	sbeHaltStateRecovery(proc);
+	sbeHaltStateRecovery(proc, false);
 
 	// validate SBE state
 	validateSBEState(proc);
