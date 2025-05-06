@@ -70,6 +70,16 @@ EKB_CXXFLAGS=" \
 -I${INCDIR}/ekb/chips/${CHIP}/procedures/hwp/lib \
 -I${INCDIR}/ekb/chips/${CHIP}/procedures/hwp/sbe" 
 
+# Add local include directories
+LOCAL_INCLUDE_DIRS=" \
+-I${srcdir}/error \
+-I${srcdir}/ffdc \
+-I${srcdir}/sbeintf \
+-I${srcdir}/sbeplat \
+-I${srcdir}/util"
+
+CXXFLAGS="$CXXFLAGS $LOCAL_INCLUDE_DIRS"
+
 AC_SUBST([EKB_CXXFLAGS])
 
 saved_LDFLAGS=$LDFLAGS

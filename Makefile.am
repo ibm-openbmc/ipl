@@ -11,6 +11,7 @@ if BUILD_PHAL_API
 lib_LTLIBRARIES += libphal.la
 include_HEADERS += libphal/phal_exception.H
 include_HEADERS += libphal/libphal.H
+include_HEADERS += error/errl_factory.H
 endif
 
 istep0_SOURCES = istep0.C
@@ -103,7 +104,15 @@ libphal_la_SOURCES = \
 	libphal/libphal.H \
 	libphal/phal_sbe.C \
 	libphal/phal_pdbg.C \
-	libphal/phal_dump.C
+	libphal/phal_dump.C \
+	error/errl_entry.C \
+    error/errl_factory.C \
+    error/errl_handle.C \
+    error/process_sbe_ffdc.C \
+    error/sbe_boot_failure.C \
+    ffdc/ffdc_pel_convert.C \
+    sbeintf/sbe_resp_parser.C \
+    util/pdbg_util.C \
 
 libphal_la_CXXFLAGS = -Wall -Werror $(EKB_CXXFLAGS) \
 	-I$(srcdir)/libphal
