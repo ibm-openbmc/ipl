@@ -16,6 +16,13 @@ namespace openpower::phal
 {
 namespace sbe
 {
+struct FFDCEntry
+{
+    std::vector<uint8_t> data;
+    uint16_t lenInWords;
+    uint32_t fapiRc;
+};
+
 /**
  * @brief utility function to check SBE state to allow chipops.
  *
@@ -90,6 +97,9 @@ bool isDumpAllowed(struct pdbg_target *proc);
  *             std::runtime_error - for file operation failure.
  */
 sbeError_t captureFFDC(struct pdbg_target *proc, bool coSuccess = false);
+
+sbeError_t capturePfutFFDC(struct pdbg_target *target,
+			std::vector<FFDCEntry>& lientry);
 
 /**
  * @brief Execute continue mpipl on the pib

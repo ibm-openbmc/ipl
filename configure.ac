@@ -31,6 +31,17 @@ if test "x$enable_libphal" = "xyes"; then
 	CFLAGS="$CFLAGS $LIBDT_API_CFLAGS"
 fi
 
+AC_ARG_ENABLE([phal],
+  AS_HELP_STRING([--enable-phal], [Build with PHAL support (links with libsystemd)]))
+AM_CONDITIONAL([BUILD_PHAL], [test "x$enable_phal" = "xyes"])
+
+if test "x$enable_phal" = "xyes"; then
+  AC_DEFINE([PHAL], [1], [Define to enable PHAL-related features])
+  PKG_CHECK_MODULES([SYSTEMD], [libsystemd])
+  LIBS="$LIBS $SYSTEMD_LIBS"
+  CXXFLAGS="$CXXFLAGS $SYSTEMD_CFLAGS"
+fi
+
 AC_LANG([C++])
 # Adding the required C++ version directly is not typically recommended
 # practice. However, Autotools does not support AX_CXX_COMPILE_STDCXX_23 or
@@ -68,7 +79,18 @@ EKB_CXXFLAGS=" \
 -I${INCDIR}/ekb/hwpf/fapi2/include \
 -I${INCDIR}/ekb/chips/${CHIP}/procedures/hwp/ffdc \
 -I${INCDIR}/ekb/chips/${CHIP}/procedures/hwp/lib \
--I${INCDIR}/ekb/chips/${CHIP}/procedures/hwp/sbe" 
+-I${INCDIR}/ekb/chips/${CHIP}/procedures/hwp/sbe"
+
+
+# Add local include directories
+LOCAL_INCLUDE_DIRS=" \
+-I${srcdir}/error \
+-I${srcdir}/sbeintf \
+-I${srcdir}/sbeplat \
+-I${srcdir}/log \
+-I${srcdir}/util"
+
+CXXFLAGS="$CXXFLAGS $LOCAL_INCLUDE_DIRS"
 
 AC_SUBST([EKB_CXXFLAGS])
 
