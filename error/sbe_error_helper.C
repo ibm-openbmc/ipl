@@ -15,7 +15,7 @@ extern "C"
 namespace errl::sbe_err_helper
 {
 std::optional<std::unique_ptr<ErrlHandle>>
-    create(std::string_view msg, pdbg_target* target);
+    create(std::string_view msg, pdbg_target* target)
 {
     assert(target && "sbe_boot_failure create: target is null");
     uint32_t chipPos = pdbg_target_index(target);
