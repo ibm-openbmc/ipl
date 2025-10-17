@@ -46,6 +46,7 @@ bool ipl_is_present(TARGETING::ConstTargetPtr target);
  * @return true if the target is functional, false otherwise
  */
 bool ipl_is_functional(struct pdbg_target *target);
+bool ipl_is_functional(TARGETING::ConstTargetPtr target);
 TARGETING::TargetPtr getFunctionalMasterProc(void);
 /**
  * @brief Check if functional master processor is available.
