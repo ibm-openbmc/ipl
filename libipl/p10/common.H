@@ -7,11 +7,14 @@ extern "C" {
 #include <libpdbg_sbe.h>
 }
 
+#include <targeting/target.H>
+#include <targeting/target_service.H>
 #include <ekb/hwpf/fapi2/include/return_code.H>
 
 #define NUM_CLOCK_FOR_REDUNDANT_MODE 2
 
 bool ipl_is_master_proc(struct pdbg_target *proc);
+bool ipl_is_master_proc(TARGETING::ConstTargetPtr proc);
 int ipl_istep_via_sbe(int major, int minor);
 int ipl_istep_via_hostboot(int major, int minor);
 
@@ -34,6 +37,7 @@ bool ipl_sbe_booted(struct pdbg_target *proc, uint32_t wait_time_seconds);
  */
 
 bool ipl_is_present(struct pdbg_target *target);
+bool ipl_is_present(TARGETING::ConstTargetPtr target);
 /**
  * @brief Determine whether the target is functional or not
  *
@@ -42,7 +46,7 @@ bool ipl_is_present(struct pdbg_target *target);
  * @return true if the target is functional, false otherwise
  */
 bool ipl_is_functional(struct pdbg_target *target);
-
+TARGETING::TargetPtr getFunctionalMasterProc(void);
 /**
  * @brief Check if functional master processor is available.
  *

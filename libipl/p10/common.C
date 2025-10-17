@@ -12,6 +12,14 @@ extern "C" {
 #include <libekb.H>
 #include <error_info_defs.H>
 
+#include <targeting/target_service.H>
+#include <targeting/predicates/predicateattrval.H>
+#include <targeting/predicates/predicateisfunctional.H>
+#include <targeting/predicates/predicatepostfixexpr.H>
+#include <targeting/target.H>
+#include <targeting/xmltohb/attributeenums.H>
+#include <targeting/xmltohb/attributetraits.H>
+
 #include <ekb/hwpf/fapi2/include/return_code_defs.H>
 #include <ekb/chips/p10/procedures/hwp/istep/p10_do_fw_hb_istep.H>
 #include <ekb/chips/p10/procedures/hwp/sbe/p10_get_sbe_msg_register.H>
@@ -25,9 +33,8 @@ bool ipl_is_master_proc(struct pdbg_target *proc)
 		ipl_log(IPL_ERROR,
 			"Attribute [ATTR_PROC_MASTER_TYPE] read failed \n");
 
-		if (pdbg_target_index(proc) == 0)
+        if (pdbg_target_index(proc) == 0)
 			return true;
-
 		return false;
 	}
 
@@ -36,6 +43,21 @@ bool ipl_is_master_proc(struct pdbg_target *proc)
 		return true;
 
 	return false;
+}
+
+bool ipl_is_master_proc(TARGETING::ConstTargetPtr proc)
+{
+    using namespace TARGETING;
+    AttributeTraits<ATTR_PROC_MASTER_TYPE>::Type val =  PROC_MASTER_TYPE_INVALID;
+
+    if(!proc->tryGetAttr<ATTR_PROC_MASTER_TYPE>(val))
+    {
+        std::cerr << "p12-refactor ipl_is_master_proc: Attribute read failed\n";
+        return false;
+    }
+
+    std::cout << "p12-refactor PROC_MASTER_TYPE: " << static_cast<PROC_MASTER_TYPE>(val) << std::endl;
+    return (static_cast<PROC_MASTER_TYPE>(val) == PROC_MASTER_TYPE_ACTING_MASTER);
 }
 
 int ipl_istep_via_sbe(int major, int minor)
@@ -200,6 +222,20 @@ bool ipl_is_present(struct pdbg_target *target)
 	return (buf[4] & 0x40);
 }
 
+bool ipl_is_present(TARGETING::ConstTargetPtr target)
+{
+    using namespace TARGETING;
+    AttributeTraits<ATTR_HWAS_STATE>::Type hwas{};
+
+    if(!target->tryGetAttr<ATTR_HWAS_STATE>(hwas))
+    {
+        std::cout << "p12-refactor ipl_is_present: Attribute read failed\n";
+        return false;
+    }
+
+    return static_cast<bool>(hwas.present);
+}
+
 bool ipl_is_functional(struct pdbg_target *target)
 {
 	uint8_t buf[5];
@@ -220,6 +256,20 @@ bool ipl_is_functional(struct pdbg_target *target)
 	return (buf[4] & 0x20);
 }
 
+bool ipl_is_functional(TARGETING::ConstTargetPtr target)
+{
+    using namespace TARGETING;
+    AttributeTraits<ATTR_HWAS_STATE>::Type hwas{};
+
+    if(!target->tryGetAttr<ATTR_HWAS_STATE>(hwas))
+    {
+        std::cout << "p12-refactor ipl_is_functional: Attribute read failed\n";
+        return false;
+    }
+
+    return static_cast<bool>(hwas.functional);
+}
+
 bool ipl_check_functional_master(void)
 {
 	struct pdbg_target *proc;
@@ -238,6 +288,42 @@ bool ipl_check_functional_master(void)
 	}
 
 	return true;
+}
+
+TARGETING::TargetPtr getFunctionalMasterProc(void)
+{
+    using namespace TARGETING;
+
+    auto& ts = TargetService::instance();
+    auto top = ts.getTopLevelTarget();
+
+    auto isFunctional = std::make_shared<PredicateIsFunctional>();
+    auto typeProc = std::make_shared<PredicateAttrVal<ATTR_TYPE>>(TYPE_PROC);
+    auto masterProc = std::make_shared<PredicateAttrVal<ATTR_PROC_MASTER_TYPE>>(
+        0); // 0 = master proc
+
+    PredicatePostfixExpr masterFuncProcPred;
+    masterFuncProcPred.push(typeProc).push(masterProc).And()
+                      .push(isFunctional).And();
+
+    auto targets = ts.getAssociated(top, AssociationType::childByPhysical,
+                                    RecursionLevel::all, &masterFuncProcPred);
+    if (targets.empty())
+    {
+        std::cerr << "p12-refactor: functional master proc not found" << std::endl;
+        return nullptr;
+    }
+
+    if (targets.size() != 1)
+    {
+        std::cerr << "p12-refactor: Functional master procs Expected: 1 Found: "
+                  << targets.size() << std::endl;
+        return nullptr;
+    }
+
+    std::cout << "p12-refactor: getFunctionalMasterProc returning target" << std::endl;
+
+    return targets.front();
 }
 
 struct pdbg_target *ipl_get_functional_primary_proc(void)
