@@ -55,6 +55,7 @@ endif
 if BUILD_P10
 libipl_istep_SOURCES = \
 	libipl/p10/common.C \
+	libipl/p10/ipl_sbe.C \
 	libipl/p10/ipl0.C \
 	libipl/p10/ipl1.C \
 	libipl/p10/ipl2.C \
