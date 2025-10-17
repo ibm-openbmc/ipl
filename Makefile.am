@@ -106,7 +106,6 @@ libphal_la_SOURCES = \
 	libphal/libphal.H \
 	libphal/phal_sbe.C \
 	libphal/phal_pdbg.C \
-	libphal/phal_dump.C \
 	error/errl_entry.C \
 	error/errl_factory.C \
 	error/errl_handle.C \

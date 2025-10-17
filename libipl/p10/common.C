@@ -85,13 +85,14 @@ int ipl_istep_via_sbe(int major, int minor)
 	return rc;
 }
 
-int ipl_istep_via_hostboot(int major, int minor)
+[[maybe_unused]] int ipl_istep_via_hostboot(int /*major*/, int /*minor*/)
 {
+    /* TODO p12-refactor
 	struct pdbg_target *proc;
-	uint64_t retry_limit_ms = 30 * 60 * 1000;
-	uint64_t delay_ms = 100;
+    uint64_t retry_limit_ms = 30 * 60 * 1000;
+	uint64_t delay_ms = 100;*/
 	int rc = 1;
-
+    /*
 	ipl_log(IPL_INFO, "Istep: Hostboot %d.%d : started\n", major, minor);
 
 	pdbg_for_each_class_target("proc", proc)
@@ -114,8 +115,9 @@ int ipl_istep_via_hostboot(int major, int minor)
 			"Running p10_do_fw_hb_istep HWP on processor %d\n",
 			pdbg_target_index(proc));
 
-		fapi_rc = p10_do_fw_hb_istep(proc, major, minor, retry_limit_ms,
+        fapi_rc = p10_do_fw_hb_istep(proc, major, minor, retry_limit_ms,
 					     delay_ms);
+
 		if (fapi_rc != fapi2::FAPI2_RC_SUCCESS)
 			ipl_log(IPL_ERROR,
 				"Istep %d.%d failed on chip %d, rc=%d\n", major,
@@ -126,13 +128,14 @@ int ipl_istep_via_hostboot(int major, int minor)
 		ipl_error_callback((rc == 0) ? IPL_ERR_OK : IPL_ERR_HWP);
 		break;
 	}
-
+*/
 	return rc;
 }
 
-bool ipl_sbe_booted(struct pdbg_target *proc, uint32_t wait_time_seconds)
+[[maybe_unused]] bool ipl_sbe_booted(struct pdbg_target * /*proc*/, uint32_t /*wait_time_seconds*/)
 {
-	sbeMsgReg_t sbeReg;
+    //TODO p12-refactor
+	/*sbeMsgReg_t sbeReg;
 	fapi2::ReturnCode fapi_rc;
 	uint32_t loopcount;
 
@@ -175,7 +178,7 @@ bool ipl_sbe_booted(struct pdbg_target *proc, uint32_t wait_time_seconds)
 		}
 	}
 	ipl_log(IPL_ERROR, "SBE Debug Data: 0x2809[0x%08x]  0x1007[0x%08x] \n",
-		uint32_t(sbeReg.reg), val);
+		uint32_t(sbeReg.reg), val);*/
 	return false;
 }
 
@@ -346,8 +349,8 @@ int ipl_set_sbe_state_all_sec(enum sbe_state state)
 	return ret;
 }
 
-void ipl_process_fapi_error(const fapi2::ReturnCode &fapirc,
-			    struct pdbg_target *target, bool deconfig)
+[[maybe_unused]] void ipl_process_fapi_error(const fapi2::ReturnCode &fapirc,
+			    struct pdbg_target * target, bool deconfig)
 {
 	if (fapirc == fapi2::FAPI2_RC_SUCCESS) {
 		ipl_error_callback(IPL_ERR_OK);
