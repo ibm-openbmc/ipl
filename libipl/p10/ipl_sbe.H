@@ -7,7 +7,11 @@
 
 /*The sbe register and state values in this file picked
   from libpdbg/libpdbg_sbe.H & libpdbg/sbe_api.C to decouple
-  targeting-sbe method's dependency on pdbg library*/
+  targeting-sbe method's dependency on pdbg library
+TODO:
+Check: these values differ with the values defined in 
+sbe/public/src/runtime/common/core/sbestates.H*/
+
 
 namespace ipl::sbe
 {

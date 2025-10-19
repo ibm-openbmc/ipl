@@ -10,6 +10,8 @@
 #include <set>
 #include <expected>
 
+#include <targeting/target_service.H>
+
 namespace openpower::phal::pdbg
 {
 
@@ -22,6 +24,7 @@ void init(pdbg_backend pdbgBackend, const int32_t logLevel,
 {
 	log(level::INFO, "PDBG Initilization started");
 
+    TARGETING::TargetService::instance().init("/tmp/targeting_test.dtb");
 	// set PDBG Back-end
 	if (!pdbg_set_backend(pdbgBackend, NULL)) {
 		log(level::ERROR, "Failed to set pdbg back-end(%d)",

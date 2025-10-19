@@ -45,21 +45,6 @@ bool ipl_is_master_proc(struct pdbg_target *proc)
 	return false;
 }
 
-bool ipl_is_master_proc(TARGETING::ConstTargetPtr proc)
-{
-    using namespace TARGETING;
-    AttributeTraits<ATTR_PROC_MASTER_TYPE>::Type val =  PROC_MASTER_TYPE_INVALID;
-
-    if(!proc->tryGetAttr<ATTR_PROC_MASTER_TYPE>(val))
-    {
-        std::cerr << "p12-refactor ipl_is_master_proc: Attribute read failed\n";
-        return false;
-    }
-
-    std::cout << "p12-refactor PROC_MASTER_TYPE: " << static_cast<PROC_MASTER_TYPE>(val) << std::endl;
-    return (static_cast<PROC_MASTER_TYPE>(val) == PROC_MASTER_TYPE_ACTING_MASTER);
-}
-
 int ipl_istep_via_sbe(int major, int minor)
 {
 	struct pdbg_target *pib, *proc;
@@ -109,12 +94,12 @@ int ipl_istep_via_sbe(int major, int minor)
 
 [[maybe_unused]] int ipl_istep_via_hostboot(int /*major*/, int /*minor*/)
 {
-    /* TODO p12-refactor
+    /* TODO phal-refactor
 	struct pdbg_target *proc;
     uint64_t retry_limit_ms = 30 * 60 * 1000;
-	uint64_t delay_ms = 100;*/
+	uint64_t delay_ms = 100;
 	int rc = 1;
-    /*
+    
 	ipl_log(IPL_INFO, "Istep: Hostboot %d.%d : started\n", major, minor);
 
 	pdbg_for_each_class_target("proc", proc)
@@ -150,13 +135,13 @@ int ipl_istep_via_sbe(int major, int minor)
 		ipl_error_callback((rc == 0) ? IPL_ERR_OK : IPL_ERR_HWP);
 		break;
 	}
-*/
-	return rc;
+	return rc;*/
+    return 1;
 }
 
 [[maybe_unused]] bool ipl_sbe_booted(struct pdbg_target * /*proc*/, uint32_t /*wait_time_seconds*/)
 {
-    //TODO p12-refactor
+    //TODO phal-refactor
 	/*sbeMsgReg_t sbeReg;
 	fapi2::ReturnCode fapi_rc;
 	uint32_t loopcount;
@@ -229,7 +214,7 @@ bool ipl_is_present(TARGETING::ConstTargetPtr target)
 
     if(!target->tryGetAttr<ATTR_HWAS_STATE>(hwas))
     {
-        std::cout << "p12-refactor ipl_is_present: Attribute read failed\n";
+        std::cout << "phal-refactor ipl_is_present: Attribute read failed\n";
         return false;
     }
 
@@ -254,20 +239,6 @@ bool ipl_is_functional(struct pdbg_target *target)
 	// isFuntional bit is stored in 4th byte and bit 3 position in
 	// HWAS_STATE
 	return (buf[4] & 0x20);
-}
-
-bool ipl_is_functional(TARGETING::ConstTargetPtr target)
-{
-    using namespace TARGETING;
-    AttributeTraits<ATTR_HWAS_STATE>::Type hwas{};
-
-    if(!target->tryGetAttr<ATTR_HWAS_STATE>(hwas))
-    {
-        std::cout << "p12-refactor ipl_is_functional: Attribute read failed\n";
-        return false;
-    }
-
-    return static_cast<bool>(hwas.functional);
 }
 
 bool ipl_check_functional_master(void)
@@ -310,18 +281,18 @@ TARGETING::TargetPtr getFunctionalMasterProc(void)
                                     RecursionLevel::all, &masterFuncProcPred);
     if (targets.empty())
     {
-        std::cerr << "p12-refactor: functional master proc not found" << std::endl;
+        std::cerr << "phal-refactor functional master proc not found" << std::endl;
         return nullptr;
     }
 
     if (targets.size() != 1)
     {
-        std::cerr << "p12-refactor: Functional master procs Expected: 1 Found: "
+        std::cerr << "phal-refactor Functional master procs Expected: 1 Found: "
                   << targets.size() << std::endl;
         return nullptr;
     }
 
-    std::cout << "p12-refactor: getFunctionalMasterProc returning target" << std::endl;
+    //std::cout << "phal-refactor Functional MasterProc found" << std::endl;
 
     return targets.front();
 }

@@ -61,7 +61,7 @@ int ipl_sbe_get_state(TARGETING::ConstTargetPtr target, enum sbe_state *state)
 
 int sbe_mpipl_continue(TARGETING::ConstTargetPtr /*target*/)
 {
-    //TODO p12-refactor
+    //TODO phal-refactor
 	/*struct chipop *chipop;
 	int rc;
 
@@ -84,7 +84,7 @@ int sbe_mpipl_continue(TARGETING::ConstTargetPtr /*target*/)
 
 ipl_error_type ipl_sbe_mpipl_continue(TARGETING::ConstTargetPtr /*target*/)
 {
-    /*TODO p12-refactor
+    /*TODO phal-refactor
 	enum sbe_state state;
 	int rc = 0;
 
@@ -128,30 +128,31 @@ bool ipl_sbe_booted(TARGETING::TargetPtr target, uint32_t wait_time_seconds)
 
 	while (loopcount > 0)
     {
-        std::cout << "p12-refactor executing p10_get_sbe_msg_register\n";
+        std::cout << "phal-refactor executing p10_get_sbe_msg_register\n";
 	    fapi_rc = p10_get_sbe_msg_register(target, sbeReg);
 
         if (fapi_rc == fapi2::FAPI2_RC_SUCCESS)
         {
 			if (sbeReg.sbeBooted)
             {
-                std::cout << "p12-refactor SBE Booted, wait time: " << loopcount << "\n";
-				ipl_log(IPL_INFO,
+                std::cout << std::dec 
+                          << "phal-refactor SBE Booted, wait time: " << loopcount << "\n";
+				/*ipl_log(IPL_INFO,
 					"SBE booted. sbeReg[0x%08x] Wait time: "
 					"[%d]\n",
-					uint32_t(sbeReg.reg), loopcount);
+					uint32_t(sbeReg.reg), loopcount);*/
 				return true;
 			}
             else
             {
-                std::cout << "p12-refactor SBE boot is in progress. sbeReg[0x"
+                std::cout << "phal-refactor SBE boot is in progress. sbeReg[0x"
                      << std::hex << std::setw(8) << std::setfill('0') << uint32_t(sbeReg.reg)
                      << "]" << std::dec << std::endl;
 			}
 		}
         else
         {
-            std::cerr << "p12-refactor p10_get_sbe_msg_register failed fapi_rc = 0x"
+            std::cerr << "phal-refactor p10_get_sbe_msg_register failed fapi_rc = 0x"
                 << std::hex << static_cast<uint32_t>(fapi_rc)
                 << std::dec << std::endl;
 			
@@ -175,7 +176,7 @@ bool ipl_sbe_booted(TARGETING::TargetPtr target, uint32_t wait_time_seconds)
 		//TODO ipl_log(IPL_ERROR, "CFAM(0x1007) on %s failed", pdbg_target_path(fsi));
 	}
 
-    std::cout << "p12-refactor SBE Debug Data: 0x2809[0x"
+    std::cout << "phal-refactor SBE Debug Data: 0x2809[0x"
           << std::hex << std::setw(8) << std::setfill('0') << uint32_t(sbeReg.reg)
           << "]  0x1007[0x"
           << std::hex << std::setw(8) << std::setfill('0') << val
@@ -191,23 +192,26 @@ int ipl_set_sbe_state_all(enum sbe_state state, bool skipMaster)
     int ret = 0;
     auto& ts = TargetService::instance();
 
-    PredicateAttrVal<ATTR_TYPE> pred(TYPE_PROC);
-
     auto top = ts.getTopLevelTarget();
+    
+    auto typeProc = std::make_shared<PredicateAttrVal<ATTR_TYPE>>(TYPE_PROC);
+    auto masterProc = std::make_shared<PredicateAttrVal<ATTR_PROC_MASTER_TYPE>>(0);
+    PredicatePostfixExpr predExpr;
+    
+    predExpr.push(typeProc);
 
+    if(skipMaster)
+    {
+        predExpr.push(masterProc).Not().And();
+    }
+   
     for (auto&& proc :
             ts.getAssociated(top, AssociationType::childByPhysical,
-                             RecursionLevel::all, &pred))
+                             RecursionLevel::all, &predExpr))
     {
-        if(skipMaster && ipl_is_master_proc(proc))
-            continue;
-
-		if (ipl_is_present(proc))
+		if (ipl_is_present(proc) && ipl_sbe_set_state(proc, state))
         {
-			if (ipl_sbe_set_state(proc, state))
-            {
-				ret = 1;
-			}
+			ret = 1;
 		}
 	}
 	return ret;

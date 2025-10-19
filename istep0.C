@@ -8,8 +8,12 @@ extern "C" {
 #include <libekb.H>
 #include <libipl/libipl.H>
 
+#include <targeting/target_service.H>
+
 int main(void)
 {
+    TARGETING::TargetService::instance().init("/tmp/targeting_test.dtb");
+
 	if (!pdbg_targets_init(NULL))
 		exit(1);
 
