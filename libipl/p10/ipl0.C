@@ -11,6 +11,7 @@ extern "C" {
 #include "libipl.H"
 #include "libipl_internal.H"
 #include "common.H"
+#include "ipl_sbe.H"
 #include <attributes_info.H>
 
 #include <ekb/chips/p10/procedures/hwp/perv/p10_start_cbs.H>
@@ -18,6 +19,14 @@ extern "C" {
 #include <ekb/chips/p10/procedures/hwp/perv/p10_clock_test.H>
 #include <ekb/chips/p10/procedures/hwp/perv/p10_setup_sbe_config.H>
 #include <ekb/chips/p10/procedures/hwp/perv/p10_select_boot_master.H>
+
+#include <targeting/target_service.H>
+#include <targeting/predicates/predicateattrval.H>
+#include <targeting/predicates/predicateisfunctional.H>
+#include <targeting/predicates/predicatepostfixexpr.H>
+#include <targeting/target.H>
+#include <targeting/xmltohb/attributeenums.H>
+#include <targeting/xmltohb/attributetraits.H>
 
 #include <libguard/guard_interface.hpp>
 #include <libguard/guard_entity.hpp>
@@ -128,6 +137,34 @@ static bool set_or_clear_state(struct pdbg_target *target, bool do_set)
 	return true;
 }
 
+static bool set_or_clear_state(TARGETING::TargetPtr target, bool do_set)
+{
+    using namespace TARGETING;
+
+    AttributeTraits<ATTR_HWAS_STATE>::Type hwas;
+    if(!target->tryGetAttr<ATTR_HWAS_STATE>(hwas))
+    {
+        std::cerr << "phal-refactor set_or_clear_state Attribute read failed\n";
+		return false;
+    }
+    
+    hwas.functional = 0;
+   
+    if(do_set)
+    {
+        hwas.present = 1;
+        hwas.functional = 1;
+    }
+
+    if(!target->trySetAttr<ATTR_HWAS_STATE>(hwas))
+    {
+        std::cerr << "phal-refactor set_or_clear_state Attribute write failed\n";
+		return false;
+    }
+
+    return true;
+}
+
 /*
  * Helper function set the clock functional state based on
  * ATTR_SYS_CLOCK_DECONFIG_STATE values
@@ -139,75 +176,95 @@ static bool set_or_clear_state(struct pdbg_target *target, bool do_set)
  */
 static bool update_clock_func_state(void)
 {
+	using namespace TARGETING;
+
 	ipl_log(
 	    IPL_INFO,
 	    "Updating ref clock target HWAS state based on Hostboot value \n");
 
-	ATTR_SYS_CLOCK_DECONFIG_STATE_Type clk_state =
-	    ENUM_ATTR_SYS_CLOCK_DECONFIG_STATE_NO_DECONFIG;
+    AttributeTraits<ATTR_SYS_CLOCK_DECONFIG_STATE>::Type clk_state =
+                        SYS_CLOCK_DECONFIG_STATE_NO_DECONFIG;
 
-	struct pdbg_target *clock_target;
-	struct pdbg_target *root = pdbg_target_root();
-	if (!pdbg_target_get_attribute(root, "ATTR_SYS_CLOCK_DECONFIG_STATE", 4,
-				       1, &clk_state)) {
-		ipl_log(
+    auto& ts = TargetService::instance();
+    auto top = ts.getTopLevelTarget();
+
+    if(!top->tryGetAttr<ATTR_SYS_CLOCK_DECONFIG_STATE>(clk_state))
+    {
+        std::cout << "phal-refactor trygetattr failed ATTR_SYS_CLOCK_DECONFIG_STATE\n";
+        ipl_log(
 		    IPL_ERROR,
 		    "Attribute [ATTR_SYS_CLOCK_DECONFIG_STATE] read failed \n");
-		ipl_plat_procedure_error_handler(IPL_ERR_ATTR_READ_FAIL);
-		return false;
-	}
+		//ipl_plat_procedure_error_handler(IPL_ERR_ATTR_READ_FAIL);
+		//return false;
+    }
 
-	if (clk_state == ENUM_ATTR_SYS_CLOCK_DECONFIG_STATE_NO_DECONFIG) {
+	if (clk_state == SYS_CLOCK_DECONFIG_STATE_NO_DECONFIG)
+    {
 		// No HWAS state update required
 		ipl_log(IPL_INFO, "update_clock_func_state : No updates \n");
 		return true;
 	}
-	pdbg_for_each_class_target("oscrefclk", clock_target)
-	{
-		if (clk_state ==
-		    ENUM_ATTR_SYS_CLOCK_DECONFIG_STATE_ALL_DECONFIG) {
+
+    PredicateAttrVal<ATTR_TYPE> pred(TYPE_OSCREFCLK);
+
+    for (auto&& clock_target :
+            ts.getAssociated(top, AssociationType::childByPhysical,
+                             RecursionLevel::all, &pred))
+    {
+        if (clk_state == SYS_CLOCK_DECONFIG_STATE_ALL_DECONFIG)
+        {
 			// Update HWAS state to non-functional
-			ipl_log(IPL_INFO,
+			/*TODO ipl_log(IPL_INFO,
 				"Clock(%s) setting to non functional \n",
-				pdbg_target_path(clock_target));
-			if (!set_or_clear_state(clock_target, false)) {
-				return false;
+				pdbg_target_path(clock_target));*/
+			if (!set_or_clear_state(clock_target, false))
+            {
+                std::cout << "phal-refactor setorclearstate-1 failed\n";
+				//return false;
 			}
 			continue;
 		}
-		// Get Clock position
-		ATTR_POSITION_Type clk_pos;
-		if (!pdbg_target_get_attribute(clock_target, "ATTR_POSITION", 2,
-					       1, &clk_pos)) {
-			ipl_log(IPL_ERROR,
-				"Attribute ATTR_POSITION read failed"
-				" for clock '%s' \n",
-				pdbg_target_path(clock_target));
-			ipl_plat_procedure_error_handler(
-			    IPL_ERR_ATTR_READ_FAIL);
-			return false;
-		}
-		// Assumption: Clock A linked to ATTR_POSITION value 0 and
+
+        // Get Clock position
+        AttributeTraits<ATTR_POSITION>::Type clk_pos;
+
+        if(!clock_target->tryGetAttr<ATTR_POSITION>(clk_pos))
+        {
+            std::cout << "phal-refactor trygetattr failed ATTR_POSITION\n";
+            /*TODO ipl_log(IPL_ERROR, "Attribute ATTR_POSITION read failed"
+                    " for clock '%s' \n", pdbg_target_path(clock_target));*/
+
+            //ipl_plat_procedure_error_handler(IPL_ERR_ATTR_READ_FAIL);
+
+            //return false;
+        }
+
+        // Assumption: Clock A linked to ATTR_POSITION value 0 and
 		// Clock B linked to ATTR_POSITION value 1
-		if (((clk_pos == 0) &&
-		     (clk_state ==
-		      ENUM_ATTR_SYS_CLOCK_DECONFIG_STATE_A_DECONFIG)) ||
-		    ((clk_pos == 1) &&
-		     (clk_state ==
-		      ENUM_ATTR_SYS_CLOCK_DECONFIG_STATE_B_DECONFIG))) {
-			ipl_log(IPL_INFO,
+        const bool deconfigClkA = ((clk_pos == 0) &&
+		             (clk_state == SYS_CLOCK_DECONFIG_STATE_A_DECONFIG)) ;
+
+        const bool deconfigClkB = ((clk_pos == 1) &&
+                     (clk_state == SYS_CLOCK_DECONFIG_STATE_B_DECONFIG));
+
+        if (deconfigClkA || deconfigClkB)
+		{
+			/*TODO ipl_log(IPL_INFO,
 				"deconfig state(%d) Clock(%s) setting to non "
 				"functional \n",
-				clk_state, pdbg_target_path(clock_target));
-			if (!set_or_clear_state(clock_target, false)) {
-				return false;
+				clk_state, pdbg_target_path(clock_target));*/
+
+			if (!set_or_clear_state(clock_target, false))
+            {
+                std::cout << "phal-refactor setorclearstate-2 failed\n";
+				//TODO return false;
 			}
 		}
-	}
+    }
 	return true;
 }
 
-static int update_hwas_state_callback(struct pdbg_target *target, void *priv)
+[[maybe_unused]] static int update_hwas_state_callback(struct pdbg_target *target, void *priv)
 {
 	guard_target *target_info = static_cast<guard_target *>(priv);
 	uint8_t path[21] = {0};
@@ -359,7 +416,7 @@ static int update_hwas_state_callback(struct pdbg_target *target, void *priv)
  *   in the PowerOn or TI or Checkstop or Watchdog timeout path) is exist
  *   in the current boot.
  */
-static bool guard_action_allowed()
+[[maybe_unused]] static bool guard_action_allowed()
 {
 	if (ipl_type() == IPL_TYPE_MPIPL) {
 		return true;
@@ -381,7 +438,7 @@ static bool guard_action_allowed()
 //@Brief Function will get the guard records and will update the functional
 // state of the guarded resources in HWAS state attribute in device tree based
 // on the guard actions in the different boots.
-static void process_guard_records()
+[[maybe_unused]] static void process_guard_records()
 {
 	if (!guard_action_allowed()) {
 		ipl_log(IPL_INFO, "No guard actions in the current boot");
@@ -486,47 +543,61 @@ static void process_guard_records()
  */
 static void apply_fco_override(void)
 {
-	std::array<const char *, 8> mProcChild = {
-	    "core", "pauc", "pau", "iohs", "mc", "chiplet", "pec", "fc"};
-	struct pdbg_target *proc, *child;
-	uint8_t buf[5];
+    std::cout << "phal-refactor Executing apply_fco_override\n" ;
+    using namespace TARGETING;
+    auto& ts = TargetService::instance();
+    auto top = ts.getTopLevelTarget();
 
-	pdbg_for_each_class_target("proc", proc)
-	{
-		if (!ipl_is_master_proc(proc))
-			continue;
+    auto typeProc = std::make_shared<PredicateAttrVal<ATTR_TYPE>>(TYPE_PROC);
+    auto masterProc = std::make_shared<PredicateAttrVal<ATTR_PROC_MASTER_TYPE>>(0);
+    PredicatePostfixExpr masterFuncProcPred;
+    masterFuncProcPred.push(typeProc).push(masterProc).And();
+   
+    auto isMc = std::make_shared<PredicateAttrVal<ATTR_TYPE>>(TYPE_MC);
+    auto isCore = std::make_shared<PredicateAttrVal<ATTR_TYPE>>(TYPE_CORE);
+    auto isPauc = std::make_shared<PredicateAttrVal<ATTR_TYPE>>(TYPE_PAUC);
+    auto isPau = std::make_shared<PredicateAttrVal<ATTR_TYPE>>(TYPE_PAU);
+    auto isIohs = std::make_shared<PredicateAttrVal<ATTR_TYPE>>(TYPE_IOHS);
+    auto isPec = std::make_shared<PredicateAttrVal<ATTR_TYPE>>(TYPE_PEC);
+    auto isFc = std::make_shared<PredicateAttrVal<ATTR_TYPE>>(TYPE_FC);
+    auto isPerv = std::make_shared<PredicateAttrVal<ATTR_TYPE>>(TYPE_PERV);
 
-		for (const char *data : mProcChild) {
-			pdbg_for_each_target(data, proc, child)
-			{
+    PredicatePostfixExpr expr;
+    expr.push(isMc).push(isCore).Or()
+        .push(isPauc).Or()
+        .push(isPau).Or()
+        .push(isIohs).Or()
+        .push(isPec).Or()
+        .push(isFc).Or()
+        .push(isPerv).Or();
 
-				if (!pdbg_target_get_attribute_packed(
-					child, "ATTR_HWAS_STATE", "41", 1,
-					buf)) {
-					ipl_error_callback(
-					    IPL_ERR_ATTR_READ_FAIL);
-					continue;
-				}
+    auto proc_targets = ts.getAssociated(top, AssociationType::childByPhysical,
+                             RecursionLevel::all, &masterFuncProcPred);
+ 
+    if(proc_targets.empty() || (proc_targets.size() != 1))
+    {
+        std::cerr << "phal-refactor apply_fco_override: invalid master proc count\n";
+        return;
+    }
 
-				// 0-1 bits reserved
-				// 2nd bit Functional override
-				// 3rd bit spec deconfig
-				// 4th bit Dump capable
-				// 5th bit Functional
-				// 6th bit Present
-				// 7th bit Deconfig
-				// Checking the FCO bit is set or not. If it's
-				// set means functional and present state of
-				// target should be set.
-				if (buf[4] & 0x04) {
-					if (!set_or_clear_state(child, true)) {
-						ipl_error_callback(
-						    IPL_ERR_ATTR_WRITE);
-					}
-				}
-			}
-		}
-	}
+    for (auto&& pchild :
+            ts.getAssociated(proc_targets.front(), AssociationType::childByPhysical,
+                             RecursionLevel::all, &expr))
+    {
+        auto hwas = pchild->getAttr<ATTR_HWAS_STATE>();
+
+        if(hwas.functionalOverride)
+        {
+            std::cout << "phal-refactor applying functional override\n" ;
+            hwas.present = 1;
+            hwas.functional = 1;
+            if(!pchild->trySetAttr<ATTR_HWAS_STATE>(hwas))
+            {
+               std::cerr << "phal-refactor apply_fco_override Attribute write failed\n";
+            }
+        }
+    }
+    std::cout << "phal-refactor Done apply_fco_override\n" ;
 }
 
 //@Brief Function will set the functional and present state of master proc
@@ -536,188 +607,102 @@ static void apply_fco_override(void)
 // It will also update functional state oscrefclk target.
 static bool update_genesis_hwas_state(void)
 {
-	std::array<const char *, 8> mProcChild = {
-	    "core", "pauc", "pau", "iohs", "mc", "chiplet", "pec", "fc"};
-	struct pdbg_target *proc, *child, *clock_target;
+    using namespace TARGETING;
+    auto& ts = TargetService::instance();
+    auto top = ts.getTopLevelTarget();
 
-	bool target_enabled = false;
-	enum pdbg_target_status status;
-	uint8_t clk_pos = 0;
-	std::vector<std::pair<std::string, std::string>> ffdcs;
+    PredicatePostfixExpr procExpr;
+    procExpr.push(std::make_shared<PredicateAttrVal<ATTR_TYPE>>(TYPE_PROC));
 
-	pdbg_for_each_class_target("proc", proc)
-	{
-		if (pdbg_target_status(proc) != PDBG_TARGET_ENABLED) {
-			target_enabled = false;
-		} else {
-			target_enabled = true;
-		}
+    auto isMc = std::make_shared<PredicateAttrVal<ATTR_TYPE>>(TYPE_MC);
+    auto isCore = std::make_shared<PredicateAttrVal<ATTR_TYPE>>(TYPE_CORE);
+    auto isPauc = std::make_shared<PredicateAttrVal<ATTR_TYPE>>(TYPE_PAUC);
+    auto isPau = std::make_shared<PredicateAttrVal<ATTR_TYPE>>(TYPE_PAU);
+    auto isIohs = std::make_shared<PredicateAttrVal<ATTR_TYPE>>(TYPE_IOHS);
+    auto isPec = std::make_shared<PredicateAttrVal<ATTR_TYPE>>(TYPE_PEC);
+    auto isFc = std::make_shared<PredicateAttrVal<ATTR_TYPE>>(TYPE_FC);
+    auto isPerv = std::make_shared<PredicateAttrVal<ATTR_TYPE>>(TYPE_PERV);
+    
+    PredicatePostfixExpr expr;
+    expr.push(isMc).push(isCore).Or()
+        .push(isPauc).Or()
+        .push(isPau).Or()
+        .push(isIohs).Or()
+        .push(isPec).Or()
+        .push(isFc).Or()
+        .push(isPerv).Or();
 
-		if (!set_or_clear_state(proc, target_enabled)) {
-			ipl_log(IPL_ERROR,
+    for (auto&& proc :
+            ts.getAssociated(top, AssociationType::childByPhysical,
+                             RecursionLevel::all, &procExpr))
+    {
+		if (!set_or_clear_state(proc, true))
+        {
+            std::cout << "phal-refactor failed to set proc hwas state\n";
+			/*TODO ipl_log(IPL_ERROR,
 				"Failed to set HWAS state of proc %d\n",
 				pdbg_target_index(proc));
-			ipl_error_callback(IPL_ERR_ATTR_WRITE);
+			ipl_error_callback(IPL_ERR_ATTR_WRITE);*/
 			return false;
 		}
+    }
 
-		if (!ipl_is_master_proc(proc))
-			continue;
+    //the master proc
+    procExpr.push(std::make_shared<PredicateAttrVal<ATTR_PROC_MASTER_TYPE>>(0))
+            .And();
 
-		for (const char *data : mProcChild) {
-			pdbg_for_each_target(data, proc, child)
-			{
-				// mark targets as non functional in the devtree
-				// if it is marked UNUSED in the MRW. This is a workaround for
-				// handling unused IOHS targets in Bonnell.	
-				if (strcmp(data , "iohs") == 0)
-				{
-					ATTR_IOHS_CONFIG_MODE_Type iohs_config;
-					if (!pdbg_target_get_attribute(child,
-						"ATTR_IOHS_CONFIG_MODE",
-						1,
-						1, &iohs_config)) {
-						ipl_log(IPL_ERROR,
-							"Attribute ATTR_IOHS_CONFIG_MODE read failed"
-							" for iohs '%s' \n",
-							pdbg_target_path(child));
-						ipl_plat_procedure_error_handler(
-							IPL_ERR_ATTR_READ_FAIL);
-						return false;
-					}
-					if (iohs_config == ENUM_ATTR_IOHS_CONFIG_MODE_UNUSED) {
-						ipl_log(IPL_INFO,
-							"iohs(%s) setting to non functional \n",
-						pdbg_target_path(child));
-						if (!set_or_clear_state(child, false)) {
-							ipl_log(IPL_ERROR,
-								"Failed to set HWAS state of "
-								"%s, index %d\n",
-								data, pdbg_target_index(child));
-							ipl_error_callback(IPL_ERR_ATTR_WRITE);
-							return false;
-						}
-					}
-					else
-					{
-						if (!set_or_clear_state(child,
-							target_enabled)) {
-							ipl_log(IPL_ERROR,
-								"Failed to set HWAS state of "
-								"%s, index %d\n",
-								data, pdbg_target_index(child));
-							ipl_error_callback(IPL_ERR_ATTR_WRITE);
-							return false;
-						}
-					}
-				} //iohs
-				else {
-					if (!set_or_clear_state(child,
-							target_enabled)) {
-						ipl_log(IPL_ERROR,
-							"Failed to set HWAS state of "
-							"%s, index %d\n",
-							data, pdbg_target_index(child));
-						ipl_error_callback(IPL_ERR_ATTR_WRITE);
-						return false;
-					}
-				}
-			} //foreach
-		} //endfor
-	}
+    auto master_proc = ts.getAssociated(top, AssociationType::childByPhysical,
+                             RecursionLevel::all, &procExpr);
+    
+    if(master_proc.empty() || (master_proc.size() != 1))
+    {
+        std::cerr << "phal-refactor update_genesis_hwas_state: invalid master proc count\n";
+        return 1;
+    }
 
-	pdbg_for_each_class_target("oscrefclk", clock_target)
-	{
-		if (!pdbg_target_get_attribute(clock_target, "ATTR_POSITION", 2,
-					       1, &clk_pos)) {
+    for (auto&& pchild :
+            ts.getAssociated(master_proc.front(), AssociationType::childByPhysical,
+                             RecursionLevel::all, &expr))
+    {
+        if (!set_or_clear_state(pchild,true))
+        {
+            /*TODO ipl_log(IPL_ERROR,
+                "Failed to set HWAS state of "
+                "%s, index %d\n",
+                data, pdbg_target_index(child));
+            ipl_error_callback(IPL_ERR_ATTR_WRITE);*/
+            return false;
+        }
+    }
 
-			ipl_log(IPL_ERROR,
-				"Attribute ATTR_POSITION read failed"
-				" for clock '%s' \n",
-				pdbg_target_path(clock_target));
-			ipl_plat_procedure_error_handler(
-			    IPL_ERR_ATTR_READ_FAIL);
-			// IPL need to be failed if this step is failed for any
-			// clock, since this clock cannot be marked as
-			// functional
-			return false;
-		}
+    PredicateAttrVal<ATTR_TYPE> clkpred(TYPE_OSCREFCLK);
 
-		status = pdbg_target_probe(clock_target);
-		if (status != PDBG_TARGET_ENABLED) {
-			ipl_log(
-			    IPL_ERROR,
-			    "clock '%s' is not operational, pdbg status = %d\n",
-			    pdbg_target_path(clock_target), status);
+    for (auto&& clock_target :
+            ts.getAssociated(top, AssociationType::childByPhysical,
+                             RecursionLevel::all, &clkpred))
+    {
+        // Get Clock position
+        AttributeTraits<ATTR_POSITION>::Type clk_pos;
 
-			ffdcs.push_back(std::make_pair("PDBG_STATUS",
-						       std::to_string(status)));
-			ffdcs.push_back(std::make_pair("FAIL_TYPE",
-						       "CHIP_NOT_OPERATIONAL"));
-			ipl_plat_clock_error_handler(ffdcs, clk_pos);
-			// IPL need to be failed if any clock is not operational
-			return false;
-		}
-		if (!set_or_clear_state(clock_target, true)) {
-			ipl_log(IPL_ERROR,
-				"Failed to set HWAS state of oscrefclk, %s\n",
-				pdbg_target_path(clock_target));
-			return false;
-		}
-	}
+        if(!clock_target->tryGetAttr<ATTR_POSITION>(clk_pos))
+        {
 
-	return true;
-}
+            std::cout << "phal-refactor trygetattr failed to get clock's ATTR_POSITION\n";
+            /*TODO ipl_log(IPL_ERROR, "Attribute ATTR_POSITION read failed"
+                    " for clock '%s' \n", pdbg_target_path(clock_target));*/
 
-/**
- * @brief Wrapper function to execute continue mpipl on the proc
- *
- * @param[in] proc proc target to operate on
- *
- * return ipl error type enum
- */
-static ipl_error_type ipl_sbe_mpipl_continue(struct pdbg_target *proc)
-{
-	enum sbe_state state;
-	char path[16];
-	int ret = 0;
+            //ipl_plat_procedure_error_handler(IPL_ERR_ATTR_READ_FAIL);
 
-	ipl_log(IPL_INFO, "ipl_sbe_mpipl_continue: Enter(%s)",
-		pdbg_target_path(proc));
+            return false;
+        }
 
-	// get PIB target
-	sprintf(path, "/proc%d/pib", pdbg_target_index(proc));
-	struct pdbg_target *pib = pdbg_target_from_path(nullptr, path);
-	if (pib == nullptr) {
-		ipl_log(IPL_ERROR, "Failed to get PIB target for(%s)",
-			pdbg_target_path(proc));
-		return IPL_ERR_PIB_TGT_NOT_FOUND;
-	}
-
-	ret = sbe_get_state(pib, &state);
-	if (ret != 0) {
-		ipl_log(IPL_ERROR, "Failed to read SBE state information (%s)",
-			pdbg_target_path(pib));
-		return IPL_ERR_FSI_REG;
-	}
-
-	// SBE_STATE_CHECK_CFAM case is already handled by pdbg api
-	if (state != SBE_STATE_BOOTED) {
-		ipl_log(IPL_ERROR,
-			"SBE (%s) is not ready for chip-op: state(0x%08x)",
-			pdbg_target_path(pib), state);
-		return IPL_ERR_SBE_CHIPOP;
-	}
-
-	// call pdbg back-end function
-	ret = sbe_mpipl_continue(pib);
-	if (ret != 0) {
-		ipl_log(IPL_ERROR, "SBE (%s) mpipl continue chip-op failed",
-			pdbg_target_path(pib));
-		return IPL_ERR_SBE_CHIPOP;
-	}
-
-	return IPL_ERR_OK;
+        if (!set_or_clear_state(clock_target, true))
+        {
+            std::cout << "phal-refactor failed to set clock as functional \n";
+            return false;
+        }
+    }
+    return true;
 }
 
 static int ipl_updatehwmodel(void)
@@ -727,7 +712,7 @@ static int ipl_updatehwmodel(void)
 	constexpr auto GENESIS_BOOT_FILE = "/var/lib/phal/genesisboot";
 	fs::path genesis_boot_file = GENESIS_BOOT_FILE;
 
-	ipl_log(IPL_INFO, "Istep: updatehwmodel: started\n");
+    std::cout << "phal-refactor istep0.4 ( updatehwmodel ): started\n";
 
 	if (!fs::exists(genesis_boot_file)) {
 		ipl_log(IPL_INFO, "updatehwmodel: Genesis mode boot\n");
@@ -750,31 +735,35 @@ static int ipl_updatehwmodel(void)
 		std::ofstream file(GENESIS_BOOT_FILE);
 	}
 
+
 	if ((ipl_type() == IPL_TYPE_MPIPL) ||
 	    (!fs::exists(BOOTTIME_GUARD_INDICATOR)))
-		apply_fco_override();
+            apply_fco_override();
 
-	process_guard_records();
+	//TODO process_guard_records();
 
-	if (!boot_file_absent && (ipl_type() != IPL_TYPE_MPIPL)) {
+	if (!boot_file_absent && (ipl_type() != IPL_TYPE_MPIPL))
+    {
 		// Update SBE state to Not usable in reboot path(not on MPIPL)
 		// Boot error callback is only required for failure
-		ipl_set_sbe_state_all(SBE_STATE_NOT_USABLE);
+		ipl_set_sbe_state_all(ipl::sbe::SBE_STATE_NOT_USABLE);
 
 		// update refclock targets  functional sate based on
 		// SYS_CLOCK_DECONFIG_STATE values.
-		if (!update_clock_func_state()) {
-			ipl_log(IPL_ERROR, "Failed to update set-ref clock "
-					   "functional state \n");
-			return 1;
+		if (!update_clock_func_state())
+        {
+            std::cout << "phal-refactor ipl0.4 ( updatehwmodel ): updateclockfuncstate failed\n";
 		}
 	}
 
-	if (!ipl_check_functional_master()) {
+	if (getFunctionalMasterProc() == nullptr)
+    {
+        std::cout << "phal-refactor istep0.4 ( updatehwmodel ): no functional master\n";
 		ipl_error_callback(IPL_ERR_PRI_PROC_NON_FUNC);
 		return 1;
 	}
 
+    std::cout << "phal-refactor istep0.4 ( updatehwmodel ): done\n";
 	return 0;
 }
 
@@ -821,7 +810,7 @@ static bool skip_clock_reset()
  *
  * @return 0 on success, 1 on failure
  */
-static int initialize_and_check_clock_chip(uint8_t &clock_select)
+[[maybe_unused]] static int initialize_and_check_clock_chip(uint8_t &clock_select)
 {
 	struct pdbg_target *clock_target;
 	enum pdbg_target_status status;
@@ -984,85 +973,117 @@ static int initialize_and_check_clock_chip(uint8_t &clock_select)
 
 static int ipl_set_ref_clock(void)
 {
-	struct pdbg_target *proc;
 	int rc = 0;
+try{
+    using namespace TARGETING;
 	fapi2::ReturnCode fapirc;
-	// Default value of attribute will be for non-redundant mode
-	fapi2::ATTR_CP_REFCLOCK_SELECT_Type clock_select =
-	    ENUM_ATTR_CP_REFCLOCK_SELECT_OSC0;
 
 	if (ipl_type() == IPL_TYPE_MPIPL)
 		return -1;
 
-	ipl_log(IPL_INFO, "Istep: set_ref_clock: started\n");
+    std::cout << "phal-refactor istep0.6 ( set_ref_clock ): started\n";
 
-	proc = ipl_get_functional_primary_proc();
-	if (proc == NULL) {
-		ipl_error_callback(IPL_ERR_PRI_PROC_NON_FUNC);
+    TargetPtr proc = getFunctionalMasterProc();
+
+	if (proc == nullptr)
+    {
+        std::cout << "phal-refactor istep0.6 ( set_ref_clock ): proc is nullptr\n";
+		//ipl_error_callback(IPL_ERR_PRI_PROC_NON_FUNC);
 		return 1;
 	}
 
+/*TODO phal-refactor
 	if (initialize_and_check_clock_chip(clock_select)) {
 		ipl_log(IPL_ERROR, "Clock initialization failed\n");
 		return 1;
 	}
-
+*/
 	// Update clock select mode value.
-	if (!pdbg_target_set_attribute(proc, "ATTR_CP_REFCLOCK_SELECT", 1, 1,
-				       &clock_select)) {
-		ipl_log(IPL_ERROR,
+    // Default value of attribute will be for non-redundant mode
+    AttributeTraits<ATTR_CP_REFCLOCK_SELECT>::Type
+                            clock_select = CP_REFCLOCK_SELECT_OSC0;
+
+    if(!proc->trySetAttr<ATTR_CP_REFCLOCK_SELECT>(clock_select))
+    {
+        std::cout << "phal-refactor istep0.6 ( set_ref_clock ): trysetattr failed ATTR_CP_REFCLOCK_SELECT\n";
+		/*TODO ipl_log(IPL_ERROR,
 			"Attribute CP_REFCLOCK_SELECT update failed"
 			" for proc %d \n",
-			pdbg_target_index(proc));
-		ipl_plat_procedure_error_handler(IPL_ERR_ATTR_WRITE);
+			pdbg_target_index(proc));*/
+		//ipl_plat_procedure_error_handler(IPL_ERR_ATTR_WRITE);
 		rc++;
 		return 1;
-	}
+    }
 
-	ipl_log(IPL_INFO,
+	/*TODO ipl_log(IPL_INFO,
 		"Running p10_setup_ref_clock HWP on primary processor %d\n",
-		pdbg_target_index(proc));
+		pdbg_target_index(proc));*/
+    std::cout << "phal-refactor Executing HWP( p10_setup_ref_clock )\n";
 	fapirc = p10_setup_ref_clock(proc);
-	if (fapirc != fapi2::FAPI2_RC_SUCCESS) {
-		ipl_log(IPL_ERROR,
+    std::cout << "phal-refactor Done HWP( p10_setup_ref_clock ) \n";
+
+    if (fapirc != fapi2::FAPI2_RC_SUCCESS)
+    {
+
+        std::cout << "phal-refactor HWP( p10_setup_ref_clock ) failed fapirc =0x" << static_cast<uint32_t>(fapirc) << std::endl;
+		/*TODO ipl_log(IPL_ERROR,
 			"Istep set_ref_clock failed on chip %s, rc=%d \n",
-			pdbg_target_path(proc), fapirc);
+			pdbg_target_path(proc), fapirc);*/
 		rc++;
 	}
-
-	ipl_process_fapi_error(fapirc, proc);
-	return rc;
+    
+    std::cout << "phal-refactor istep0.6 ( set_ref_clock ): done\n";
+    //TODO ipl_process_fapi_error(fapirc, proc);
+}
+catch(const std::exception& ex)
+{
+    std::cout << "exception during istep0.6 (set_ref_clock) exception: " << ex.what() << std::endl;
+}
+    return rc;
 }
 
 static int ipl_proc_clock_test(void)
 {
-	struct pdbg_target *proc;
 	int rc = 0;
-	fapi2::ReturnCode fapirc;
+try{
+    fapi2::ReturnCode fapirc;
 
 	if (ipl_type() == IPL_TYPE_MPIPL)
 		return -1;
 
-	ipl_log(IPL_INFO, "Istep: proc_clock_test: started\n");
+    std::cout << "phal-refactor istep0.7 ( proc_clock_test ): started\n";
 
-	proc = ipl_get_functional_primary_proc();
-	if (proc == NULL) {
-		ipl_error_callback(IPL_ERR_PRI_PROC_NON_FUNC);
+	TARGETING::TargetPtr proc = getFunctionalMasterProc();
+
+    if (proc == nullptr)
+    {
+        std::cout << "phal-refactor istep0.7 ( proc_clock_test ): proc is nullptr\n";
+		//ipl_error_callback(IPL_ERR_PRI_PROC_NON_FUNC);
 		return 1;
 	}
 
-	ipl_log(IPL_INFO,
+	/*TODO ipl_log(IPL_INFO,
 		"Running p10_clock_test HWP on primary processor %d\n",
-		pdbg_target_index(proc));
+		pdbg_target_index(proc));*/
+    std::cout << "phal-refactor Executing HWP( p10_clock_test )\n";
 	fapirc = p10_clock_test(proc);
-	if (fapirc != fapi2::FAPI2_RC_SUCCESS) {
-		ipl_log(IPL_ERROR, "HWP clock_test failed on proc %d, rc=%d\n",
-			pdbg_target_index(proc), fapirc);
+    std::cout << "phal-refactor Done HWP( p10_clock_test ) \n";
+	if (fapirc != fapi2::FAPI2_RC_SUCCESS)
+    {
+        std::cout << "phal-refactor HWP( p10_clock_test ) failed fapirc =0x" << static_cast<uint32_t>(fapirc) << std::endl;
+		/*TODO ipl_log(IPL_ERROR, "HWP clock_test failed on proc %d, rc=%d\n",
+			pdbg_target_index(proc), fapirc);*/
 		rc++;
 	}
 
-	ipl_process_fapi_error(fapirc, proc);
+	//TODO ipl_process_fapi_error(fapirc, proc);
 
+    std::cout << "phal-refactor istep0.7 ( proc_clock_test ): done\n";
+}
+catch(const std::exception& ex)
+{
+    std::cout << "exception during istep0.7 ( proc_clock_test ) exception: " << ex.what() << std::endl;
+}
 	return rc;
 }
 
@@ -1083,35 +1104,61 @@ static int ipl_asset_protection(void)
 
 static int ipl_proc_select_boot_prom(void)
 {
-	struct pdbg_target *proc;
 	int rc = 1;
-
-	ipl_log(IPL_INFO, "Istep: proc_select_boot_prom: started\n");
-
+try
+{
+    std::cout << "phal-refactor istep0.11 ( proc_select_boot_prom ): started\n";
 	// Check the availabilty of primary processor.
-	if (!ipl_check_functional_master()) {
+	if (getFunctionalMasterProc() == nullptr)
+    {
 		ipl_error_callback(IPL_ERR_PRI_PROC_NON_FUNC);
 		return 1;
 	}
 
-	pdbg_for_each_class_target("proc", proc)
-	{
-		fapi2::ReturnCode fapirc;
+    using namespace TARGETING;
 
-		if (!ipl_is_master_proc(proc) || !ipl_is_functional(proc))
-			continue;
+    auto& ts = TargetService::instance();
+    auto top = ts.getTopLevelTarget();
 
-		ipl_log(IPL_INFO,
-			"Running p10_select_boot_master HWP on processor %d\n",
-			pdbg_target_index(proc));
-		fapirc = p10_select_boot_master(proc);
-		if (fapirc == fapi2::FAPI2_RC_SUCCESS)
-			rc = 0;
+    auto typeProc = std::make_shared<PredicateAttrVal<ATTR_TYPE>>(TYPE_PROC);
+    auto masterProc = std::make_shared<PredicateAttrVal<ATTR_PROC_MASTER_TYPE>>(0);
+    auto isFunctional = std::make_shared<PredicateIsFunctional>();
+    
+    PredicatePostfixExpr pred;
+    pred.push(typeProc).push(masterProc).And()
+        .push(isFunctional).And();
+        
+    auto proc_target = ts.getAssociated(top, AssociationType::childByPhysical,
+                             RecursionLevel::all, &pred);
+ 
+    if(proc_target.empty() || (proc_target.size() != 1))
+    {
+        std::cerr << "phal-refactor istep0.11 (proc_select_boot_prom): invalid master proc count\n";
+        return 1;
+    }
+    
+    fapi2::ReturnCode fapirc;
 
-		ipl_process_fapi_error(fapirc, proc);
-		break;
-	}
+    /*TODO ipl_log(IPL_INFO,
+        "Running p10_select_boot_master HWP on processor %d\n",
+        pdbg_target_index(proc));*/
+    std::cout << "phal-refactor Executing HWP( p10_select_boot_master )\n";
 
+    fapirc = p10_select_boot_master(proc_target.front());
+
+    std::cout << "phal-refactor Done HWP( p10_select_boot_master ) \n";
+
+    if (fapirc == fapi2::FAPI2_RC_SUCCESS)
+        rc = 0;
+
+    //TODO ipl_process_fapi_error(fapirc, proc);
+}
+catch(const std::exception& ex)
+{
+    std::cout << "exception during proc_select_boot_prom exception: " << ex.what() << std::endl;
+}
+    rc = 0;
+    std::cout << "phal-refactor istep0.11 ( proc_select_boot_prom ): done\n";
 	return rc;
 }
 
@@ -1122,30 +1169,33 @@ static int ipl_hb_config_update(void)
 
 static int ipl_sbe_config_update(void)
 {
-	struct pdbg_target *root, *proc;
+	using namespace TARGETING;
 	int rc = 1;
-	uint8_t istep_mode, core_mode, disable_security, attr_override;
-	uint8_t scom_allowed;
-
-	fapi2::buffer<uint32_t> boot_flags;
-
-	ipl_log(IPL_INFO, "Istep: sbe_config_update: started\n");
+try
+{
+    std::cout << "phal-refactor istep0.13 ( sbe_config_update ): started\n";
 
 	// Check the availabilty of primary processor.
-	if (!ipl_check_functional_master()) {
+	if (getFunctionalMasterProc() == nullptr)
+    {
 		ipl_error_callback(IPL_ERR_PRI_PROC_NON_FUNC);
 		return 1;
 	}
 
-	root = pdbg_target_root();
-	if (!pdbg_target_get_attribute(root, "ATTR_ISTEP_MODE", 1, 1,
-				       &istep_mode)) {
-		ipl_log(IPL_ERROR,
-			"Attribute [ATTR_ISTEP_MODE] read failed \n");
+    auto& ts = TargetService::instance();
+    auto top = ts.getTopLevelTarget();
+
+    AttributeTraits<ATTR_ISTEP_MODE>::Type istep_mode;
+
+    if(!top->tryGetAttr<ATTR_ISTEP_MODE>(istep_mode))
+    {
+        std::cout << "phal-refactor istep0.13 ( sbe_config_update ): trygetattr failed ATTR_ISTEP_MODE\n";
 		return 1;
 	}
 
-	// Bit 0 indicates istep IPL (0b1) (Used by SBE, HB – ATTR_ISTEP_MODE)
+	fapi2::buffer<uint32_t> boot_flags;
+
+     // Bit 0 indicates istep IPL (0b1) (Used by SBE, HB – ATTR_ISTEP_MODE)
 	if (istep_mode)
 		boot_flags.setBit(0);
 	else
@@ -1154,10 +1204,11 @@ static int ipl_sbe_config_update(void)
 	// Set the Security Disable bit based on the ATTR_DISABLE_SECURITY
 	// attribute. Its "0" by default, i.e. security is always enabled by
 	// default, unless user overrides the value.
-	if (!pdbg_target_get_attribute(root, "ATTR_DISABLE_SECURITY", 1, 1,
-				       &disable_security)) {
-		ipl_log(IPL_ERROR,
-			"Attribute [ATTR_DISABLE_SECURITY] read failed \n");
+    AttributeTraits<ATTR_DISABLE_SECURITY>::Type disable_security;
+
+    if(!top->tryGetAttr<ATTR_DISABLE_SECURITY>(disable_security))
+    {
+        std::cout << "phal-refactor istep0.13 ( sbe_config_update ): trygetattr failed ATTR_DISABLE_SECURITY\n";
 		return 1;
 	}
 
@@ -1171,151 +1222,192 @@ static int ipl_sbe_config_update(void)
 	else
 		boot_flags.clearBit(6);
 
+
 	// bit 7 - Allow hostboot attribute overrides. 0b1 indicates enable
-	if (!pdbg_target_get_attribute(root, "ATTR_ALLOW_ATTR_OVERRIDES", 1, 1,
-				       &attr_override)) {
-		ipl_log(IPL_ERROR,
-			"Attribute [ATTR_ALLOW_ATTR_OVERRIDES] read failed \n");
+    AttributeTraits<ATTR_ALLOW_ATTR_OVERRIDES>::Type attr_override;
+    if(!top->tryGetAttr<ATTR_ALLOW_ATTR_OVERRIDES>(attr_override))
+    {
+        std::cout << "phal-refactor istep0.13 ( sbe_config_update ): trygetattr failed ATTR_ALLOW_ATTR_OVERRIDES\n";
 		return 1;
 	}
+
 	if (attr_override)
 		boot_flags.setBit(7);
 	else
 		boot_flags.clearBit(7);
 
 	// bit 11 - Disable denial list based SCOM access. 0b1 indicates disable
-	if (!pdbg_target_get_attribute(root, "ATTR_NO_XSCOM_ENFORCEMENT", 1, 1,
-				       &scom_allowed)) {
-		ipl_log(IPL_ERROR,
-			"Attribute [ATTR_NO_XSCOM_ENFORCEMENT] read failed \n");
+    AttributeTraits<ATTR_NO_XSCOM_ENFORCEMENT>::Type scom_allowed;
+    if(!top->tryGetAttr<ATTR_NO_XSCOM_ENFORCEMENT>(scom_allowed))
+    {
+        std::cout << "phal-refactor istep0.13 ( sbe_config_update ): trygetattr failed ATTR_NO_XSCOM_ENFORCEMENT\n";
 		return 1;
 	}
+
 	if (scom_allowed)
 		boot_flags.setBit(11);
 	else
 		boot_flags.clearBit(11);
 
-	if (!pdbg_target_set_attribute(root, "ATTR_BOOT_FLAGS", 4, 1,
-				       &boot_flags)) {
-		ipl_log(IPL_ERROR,
-			"Attribute [ATTR_BOOT_FLAGS] update failed \n");
+    if(!top->trySetAttr<ATTR_BOOT_FLAGS>(boot_flags))
+    {
+        std::cout << "phal-refactor istep0.13 ( sbe_config_update ): trysetattr failed ATTR_BOOT_FLAGS\n";
 		return 1;
 	}
 
-	if (small_core_enabled())
-		core_mode = 0x00; /* CORE_UNFUSED mode */
-	else
-		core_mode = 0x01; /* CORE_FUSED mode */
+    auto isFunctional = std::make_shared<PredicateIsFunctional>();
+    auto typeProc = std::make_shared<PredicateAttrVal<ATTR_TYPE>>(TYPE_PROC);
+    auto masterProc = 
+            std::make_shared<PredicateAttrVal<ATTR_PROC_MASTER_TYPE>>(0); 
+    // 0 = master proc
 
-	if (!pdbg_target_set_attribute(root, "ATTR_FUSED_CORE_MODE", 1, 1,
-				       &core_mode)) {
-		ipl_log(IPL_ERROR,
-			"Attribute [ATTR_FUSED_CORE_MODE] update failed \n");
-		return 1;
-	}
+    PredicatePostfixExpr pred;
+    pred.push(typeProc).push(masterProc).And()
+        .push(isFunctional).And();
 
-	pdbg_for_each_class_target("proc", proc)
-	{
+    for (auto&& proc :
+            ts.getAssociated(top, AssociationType::childByPhysical,
+                             RecursionLevel::all, &pred))
+    {
 		fapi2::ReturnCode fapirc;
 
-		// Run HWP only on functional master processor
-		if (!ipl_is_master_proc(proc) || !ipl_is_functional(proc))
-			continue;
+        std::cout << "phal-refactor Executing HWP( p10_setup_sbe_config )\n";
 
-		ipl_log(IPL_INFO,
-			"Running p10_setup_sbe_config HWP on processor %d\n",
-			pdbg_target_index(proc));
-		fapirc = p10_setup_sbe_config(proc);
+        fapirc = p10_setup_sbe_config(proc);
+
+        std::cout << "phal-refactor Done  HWP( p10_setup_sbe_config )\n";
+
 		if (fapirc == fapi2::FAPI2_RC_SUCCESS)
 			rc = 0;
 
-		ipl_process_fapi_error(fapirc, proc);
+		//TODO ipl_process_fapi_error(fapirc, proc);
 		break;
 	}
-
+}
+catch(const std::exception& ex)
+{
+    std::cout << "exception during sbe_config_update exception: " << ex.what() << std::endl;
+}
+    
+    std::cout << "phal-refactor istep0.13 ( sbe_config_update ): done\n";
+    rc = 0;
 	return rc;
 }
 
 static int ipl_sbe_start(void)
 {
-	struct pdbg_target *proc;
-	int rc = 1, ret = 0;
+	std::cout << "phal-refactor istep0.14 ( sbe_start ): started\n";
+    using namespace TARGETING;
+    using namespace ipl;
 
-	ipl_log(IPL_INFO, "Istep: sbe_start: started\n");
+    int rc = 1, ret = 0;
+    fapi2::ReturnCode fapirc; 
+try{
+    auto& ts = TargetService::instance();
 
-	pdbg_for_each_class_target("proc", proc)
-	{
-		fapi2::ReturnCode fapirc;
+    PredicatePostfixExpr pred;
+    pred.push(std::make_shared<PredicateAttrVal<ATTR_TYPE>>(TYPE_PROC))
+        .push(std::make_shared<PredicateIsFunctional>())
+        .And();
 
-		if (!ipl_is_functional(proc))
-			continue;
+    auto top = ts.getTopLevelTarget();
 
-		if (ipl_mode() == IPL_CRONUS) {
-			ipl_log(IPL_INFO,
-				"Running p10_start_cbs HWP on processor %d\n",
-				pdbg_target_index(proc));
+    for (auto&& proc :
+            ts.getAssociated(top, AssociationType::childByPhysical,
+                             RecursionLevel::all, &pred))
+    {
+        if (ipl_mode() == IPL_CRONUS)
+        {
 			fapirc = p10_start_cbs(proc, true);
+
 			if (fapirc != fapi2::FAPI2_RC_SUCCESS)
 				ret++;
 
-			ipl_process_fapi_error(fapirc, proc);
+			//TODO ipl_process_fapi_error(fapirc, proc);
 			rc = ret;
 			continue;
 		}
+    }
+    
+    auto masterProc = std::make_shared<PredicateAttrVal<ATTR_PROC_MASTER_TYPE>>(0);
+    pred.push(masterProc).And();
+   
+    auto proc_target = ts.getAssociated(top, AssociationType::childByPhysical,
+                             RecursionLevel::all, &pred);
+ 
+    if(proc_target.empty() || (proc_target.size() != 1))
+    {
+        std::cerr << "phal-refactor istep0.14 ( sbe_start ): invalid master proc count\n";
+        return 1;
+    }
 
-		// Run HWP or MPIPL chip-op only on master processor in
-		// non cronus mode
-		if (ipl_is_master_proc(proc)) {
-			if (ipl_type() == IPL_TYPE_MPIPL) {
-				ipl_error_type err =
-				    ipl_sbe_mpipl_continue(proc);
-				ipl_error_callback(err);
-				rc = err;
-			} else {
-				ipl_error_type err_type = IPL_ERR_OK;
+    // Run HWP or MPIPL chip-op only on master processor in
+	// non cronus mode
+    if (ipl_type() == IPL_TYPE_MPIPL)
+    {
+        ipl_error_type err = ipl::sbe::ipl_sbe_mpipl_continue(proc_target.front());
+        ipl_error_callback(err);
+        rc = err;
+    }
+    else
+    {
+        //ipl_error_type err_type = IPL_ERR_OK;
 
-				fapirc = p10_start_cbs(proc, true);
-				if (fapirc == fapi2::FAPI2_RC_SUCCESS) {
-					// Update Primary processor SBE state to
-					// check cfam. Boot error callback is
-					// only required for failure.
-					ipl_set_sbe_state(proc,
-							  SBE_STATE_CHECK_CFAM);
+        std::cout << "phal-refactor Executing HWP( start_cbs )\n";
+        fapirc = p10_start_cbs(proc_target.front(), true);
 
-					if (!ipl_sbe_booted(proc, 25)) {
-						ipl_log(IPL_ERROR,
-							"SBE did not boot\n");
-						err_type = IPL_ERR_SBE_BOOT;
-					} else {
-						// Update Primary processor SBE
-						// state to booted Boot error
-						// callback is only required for
-						// failure.
-						ipl_set_sbe_state(
-						    proc, SBE_STATE_BOOTED);
-						rc = 0;
-					}
-				} else {
-					err_type = IPL_ERR_HWP;
-				}
-				ipl_error_callback(err_type);
-				break;
-			}
-		}
-	}
+        std::cout << "phal-refactor Done HWP( start_cbs )\n";
+        if (fapirc == fapi2::FAPI2_RC_SUCCESS)
+        {
+            // Update Primary processor SBE state to
+            // check cfam. Boot error callback is
+            // only required for failure.
+            using namespace ipl::sbe;
+            ipl_sbe_set_state(proc_target.front(), ipl::sbe::SBE_STATE_CHECK_CFAM);
 
-	if (!rc) {
+            if (!ipl_sbe_booted(proc_target.front(), 25))
+            {
+                std::cout << "phal-refactor istep0.14 ( sbe_start ): sbe failed to boot\n";
+                //err_type = IPL_ERR_SBE_BOOT;
+            }
+            else
+            {
+                // Update Primary processor SBE
+                // state to booted Boot error
+                // callback is only required for
+                // failure.
+                ipl_sbe_set_state(proc_target.front(), ipl::sbe::SBE_STATE_BOOTED);
+                rc = 0;
+            }
+        }
+        else
+        {
+            //err_type = IPL_ERR_HWP;
+        }
+        //ipl_error_callback(err_type);
+    }
+
+	if (!rc)
+    {
 		// Update Secondary processors SBE state to check cfam
 		// Boot error callback is required for failue
-		ipl_set_sbe_state_all_sec(SBE_STATE_CHECK_CFAM);
+        using namespace ipl::sbe;
+		ipl_set_sbe_state_all(ipl::sbe::SBE_STATE_CHECK_CFAM, true);
 
-		if (!ipl_check_functional_master()) {
+		if (getFunctionalMasterProc() == nullptr)
+        {
 			ipl_error_callback(IPL_ERR_PRI_PROC_NON_FUNC);
 			return 1;
 		}
-	}
-
-	return rc;
+    }
+}
+catch(const std::exception& ex)
+{
+    std::cout << "exception during sbe_start exception: " << ex.what() << std::endl;
+}
+    
+    std::cout << "phal-refactor istep0.14 ( sbe_start ): done\n";
+    return rc;
 }
 
 static int ipl_startPRD(void)
@@ -1325,40 +1417,42 @@ static int ipl_startPRD(void)
 
 static int ipl_proc_attn_listen(void)
 {
-	struct pdbg_target *fsi, *proc = NULL;
+    std::cout << "phal-refactor istep0.16 ( proc_attn_listen ): started\n";
+    using namespace TARGETING;
+
+    auto& ts = TargetService::instance();
+    auto top = ts.getTopLevelTarget();
+    
+    auto typeProc = std::make_shared<PredicateAttrVal<ATTR_TYPE>>(TYPE_PROC);
+    auto masterProc = std::make_shared<PredicateAttrVal<ATTR_PROC_MASTER_TYPE>>(0);
+    PredicatePostfixExpr masterFuncProcPred;
+    masterFuncProcPred.push(typeProc).push(masterProc).And();
+   
+    auto proc_target = ts.getAssociated(top, AssociationType::childByPhysical,
+                             RecursionLevel::all, &masterFuncProcPred);
+ 
+    if(proc_target.empty() || (proc_target.size() != 1))
+    {
+        std::cerr << "phal-refactor istep0.16 ( proc_attn_listen ): invalid master proc count\n";
+        return 1;
+    }
+   
+	/*TODO ipl_log(IPL_INFO, "enable attention listen on processor %d\n",
+		pdbg_target_index(proc));*/
+    
+
 	uint32_t regval; // for register read/write
-	char path[16];
-	int rc;
 
-	pdbg_for_each_class_target("proc", proc)
-	{
-		if (!ipl_is_functional(proc))
-			continue;
-
-		if (ipl_is_master_proc(proc))
-			break;
-	}
-
-	if (!proc) {
-		ipl_error_callback(IPL_ERR_PRI_PROC_NON_FUNC);
-		return 1;
-	}
-
-	sprintf(path, "/proc%d/fsi", pdbg_target_index(proc));
-	fsi = pdbg_target_from_path(NULL, path);
-	if (!fsi) {
-		ipl_error_callback(IPL_ERR_FSI_TGT_NOT_FOUND);
-		return 1;
-	}
-
-	ipl_log(IPL_INFO, "enable attention listen on processor %d\n",
-		pdbg_target_index(proc));
-
-	rc = fsi_read(fsi, 0x100d, &regval); // FSI2_PIB_TRUE_MASK
-	if (rc != 0) {
+    // FSI2_PIB_TRUE_MASK
+    int rc = hwaccess::HwAccessIntf::getCfamRegister(proc_target.front(), 0x100d, regval); 
+	
+    if (rc != 0)
+    {
 		ipl_log(IPL_ERROR, "read TRUEMASK register failed, rc=%d\n",
 			rc);
-	} else {
+	}
+    else 
+    {
 		// ANY_ERROR, RECOVERABLE_ERROR
 		regval &= ~0x90000000; // mask
 
@@ -1366,15 +1460,20 @@ static int ipl_proc_attn_listen(void)
 		// SELFBOOT_ENGINE_ATTENTION
 		regval |= 0x60000002; // un-mask
 
-		rc = fsi_write(fsi, 0x100d, regval); // FSI2_PIB_TRUE_MASK
-		if (rc != 0) {
+        // FSI2_PIB_TRUE_MASK
+        rc = hwaccess::HwAccessIntf::putCfamRegister(proc_target.front(), 0x100d, regval); 
+
+        if (rc != 0) 
+        {
 			ipl_log(IPL_ERROR,
 				"write TRUEMASK register failed, rc=%d\n", rc);
 		}
 	}
 
 	ipl_error_callback((rc == 0) ? IPL_ERR_OK : IPL_ERR_FSI_REG);
-	return rc;
+
+    std::cout << "phal-refactor istep0.16 ( proc_attn_listen ): done\n";
+	return rc;	
 }
 
 static struct ipl_step ipl0[] = {

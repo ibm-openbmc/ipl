@@ -118,6 +118,7 @@ void sbeHaltStateRecovery(struct pdbg_target* proc,
         throw pdbgError_t(exception::PDBG_TARGET_NOT_OPERATIONAL);
     }
 
+    /* TODO p12-refactor
     // get SBE current state based on sbe message register
     sbeMsgReg_t sbeReg;
     fapi2::ReturnCode fapiRC;
@@ -171,7 +172,7 @@ void sbeHaltStateRecovery(struct pdbg_target* proc,
         log(level::ERROR, "SBE (%s), Fail to recover from halt state",
             pdbg_target_path(proc));
         logSbeDebugData(proc);
-    }
+    }*/
 }
 
 void validateSBEState(struct pdbg_target* chip)

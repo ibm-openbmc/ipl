@@ -16,6 +16,8 @@ extern "C" {
 #include <libekb.H>
 #include <libipl/libipl.H>
 
+#include <targeting/target_service.H>
+
 static bool isstring(const char *arg)
 {
 	size_t i;
@@ -188,6 +190,8 @@ int main(int argc, char *const *argv)
 		pdbg_set_backend(backend, device);
 
 	pdbg_set_loglevel(log_level);
+
+    TARGETING::TargetService::instance().init("/tmp/targeting_test.dtb");
 
 	if (!pdbg_targets_init(NULL))
 		exit(1);

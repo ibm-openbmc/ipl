@@ -12,6 +12,14 @@ extern "C" {
 #include <libekb.H>
 #include <error_info_defs.H>
 
+#include <targeting/target_service.H>
+#include <targeting/predicates/predicateattrval.H>
+#include <targeting/predicates/predicateisfunctional.H>
+#include <targeting/predicates/predicatepostfixexpr.H>
+#include <targeting/target.H>
+#include <targeting/xmltohb/attributeenums.H>
+#include <targeting/xmltohb/attributetraits.H>
+
 #include <ekb/hwpf/fapi2/include/return_code_defs.H>
 #include <ekb/chips/p10/procedures/hwp/istep/p10_do_fw_hb_istep.H>
 #include <ekb/chips/p10/procedures/hwp/sbe/p10_get_sbe_msg_register.H>
@@ -25,9 +33,8 @@ bool ipl_is_master_proc(struct pdbg_target *proc)
 		ipl_log(IPL_ERROR,
 			"Attribute [ATTR_PROC_MASTER_TYPE] read failed \n");
 
-		if (pdbg_target_index(proc) == 0)
+        if (pdbg_target_index(proc) == 0)
 			return true;
-
 		return false;
 	}
 
@@ -85,13 +92,14 @@ int ipl_istep_via_sbe(int major, int minor)
 	return rc;
 }
 
-int ipl_istep_via_hostboot(int major, int minor)
+[[maybe_unused]] int ipl_istep_via_hostboot(int /*major*/, int /*minor*/)
 {
+    /* TODO phal-refactor
 	struct pdbg_target *proc;
-	uint64_t retry_limit_ms = 30 * 60 * 1000;
+    uint64_t retry_limit_ms = 30 * 60 * 1000;
 	uint64_t delay_ms = 100;
 	int rc = 1;
-
+    
 	ipl_log(IPL_INFO, "Istep: Hostboot %d.%d : started\n", major, minor);
 
 	pdbg_for_each_class_target("proc", proc)
@@ -114,8 +122,9 @@ int ipl_istep_via_hostboot(int major, int minor)
 			"Running p10_do_fw_hb_istep HWP on processor %d\n",
 			pdbg_target_index(proc));
 
-		fapi_rc = p10_do_fw_hb_istep(proc, major, minor, retry_limit_ms,
+        fapi_rc = p10_do_fw_hb_istep(proc, major, minor, retry_limit_ms,
 					     delay_ms);
+
 		if (fapi_rc != fapi2::FAPI2_RC_SUCCESS)
 			ipl_log(IPL_ERROR,
 				"Istep %d.%d failed on chip %d, rc=%d\n", major,
@@ -126,13 +135,14 @@ int ipl_istep_via_hostboot(int major, int minor)
 		ipl_error_callback((rc == 0) ? IPL_ERR_OK : IPL_ERR_HWP);
 		break;
 	}
-
-	return rc;
+	return rc;*/
+    return 1;
 }
 
-bool ipl_sbe_booted(struct pdbg_target *proc, uint32_t wait_time_seconds)
+[[maybe_unused]] bool ipl_sbe_booted(struct pdbg_target * /*proc*/, uint32_t /*wait_time_seconds*/)
 {
-	sbeMsgReg_t sbeReg;
+    //TODO phal-refactor
+	/*sbeMsgReg_t sbeReg;
 	fapi2::ReturnCode fapi_rc;
 	uint32_t loopcount;
 
@@ -175,7 +185,7 @@ bool ipl_sbe_booted(struct pdbg_target *proc, uint32_t wait_time_seconds)
 		}
 	}
 	ipl_log(IPL_ERROR, "SBE Debug Data: 0x2809[0x%08x]  0x1007[0x%08x] \n",
-		uint32_t(sbeReg.reg), val);
+		uint32_t(sbeReg.reg), val);*/
 	return false;
 }
 
@@ -195,6 +205,20 @@ bool ipl_is_present(struct pdbg_target *target)
 
 	// Present bit is stored in 4th byte and bit 2 position in HWAS_STATE
 	return (buf[4] & 0x40);
+}
+
+bool ipl_is_present(TARGETING::ConstTargetPtr target)
+{
+    using namespace TARGETING;
+    AttributeTraits<ATTR_HWAS_STATE>::Type hwas{};
+
+    if(!target->tryGetAttr<ATTR_HWAS_STATE>(hwas))
+    {
+        std::cout << "phal-refactor ipl_is_present: Attribute read failed\n";
+        return false;
+    }
+
+    return static_cast<bool>(hwas.present);
 }
 
 bool ipl_is_functional(struct pdbg_target *target)
@@ -235,6 +259,42 @@ bool ipl_check_functional_master(void)
 	}
 
 	return true;
+}
+
+TARGETING::TargetPtr getFunctionalMasterProc(void)
+{
+    using namespace TARGETING;
+
+    auto& ts = TargetService::instance();
+    auto top = ts.getTopLevelTarget();
+
+    auto isFunctional = std::make_shared<PredicateIsFunctional>();
+    auto typeProc = std::make_shared<PredicateAttrVal<ATTR_TYPE>>(TYPE_PROC);
+    auto masterProc = std::make_shared<PredicateAttrVal<ATTR_PROC_MASTER_TYPE>>(
+        0); // 0 = master proc
+
+    PredicatePostfixExpr masterFuncProcPred;
+    masterFuncProcPred.push(typeProc).push(masterProc).And()
+                      .push(isFunctional).And();
+
+    auto targets = ts.getAssociated(top, AssociationType::childByPhysical,
+                                    RecursionLevel::all, &masterFuncProcPred);
+    if (targets.empty())
+    {
+        std::cerr << "phal-refactor functional master proc not found" << std::endl;
+        return nullptr;
+    }
+
+    if (targets.size() != 1)
+    {
+        std::cerr << "phal-refactor Functional master procs Expected: 1 Found: "
+                  << targets.size() << std::endl;
+        return nullptr;
+    }
+
+    //std::cout << "phal-refactor Functional MasterProc found" << std::endl;
+
+    return targets.front();
 }
 
 struct pdbg_target *ipl_get_functional_primary_proc(void)
@@ -346,8 +406,8 @@ int ipl_set_sbe_state_all_sec(enum sbe_state state)
 	return ret;
 }
 
-void ipl_process_fapi_error(const fapi2::ReturnCode &fapirc,
-			    struct pdbg_target *target, bool deconfig)
+[[maybe_unused]] void ipl_process_fapi_error(const fapi2::ReturnCode &fapirc,
+			    struct pdbg_target * target, bool deconfig)
 {
 	if (fapirc == fapi2::FAPI2_RC_SUCCESS) {
 		ipl_error_callback(IPL_ERR_OK);

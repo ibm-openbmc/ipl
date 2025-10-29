@@ -28,7 +28,7 @@ int ipl_pre_poweroff(void)
 			"Running p10_pre_poweroff HWP on processor %d\n",
 			pdbg_target_index(proc));
 
-		fapi_rc = p10_pre_poweroff(proc);
+		//TODO p12-refactor fapi_rc = p10_pre_poweroff(proc);
 		if (fapi_rc != fapi2::FAPI2_RC_SUCCESS) {
 			ipl_log(IPL_ERROR,
 				"p10_pre_poweroff failed for proc index %d\n",
