@@ -1380,10 +1380,6 @@ try{
                 rc = 0;
             }
         }
-        else
-        {
-            //err_type = IPL_ERR_HWP;
-        }
         //ipl_error_callback(err_type);
     }
 

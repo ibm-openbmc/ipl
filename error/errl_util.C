@@ -73,6 +73,8 @@ int convertFAPItoPELformat(
         userData.emplace(prefix + "HW_ID", hwCallout.hwid);
         userData.emplace(prefix + "PRIORITY", hwCallout.callout_priority);
 
+        // TODO: this code need to be ported over to TARGETING
+        /*
         assert(hwCallout.target_entity_path.size() ==
                sizeof(ATTR_PHYS_BIN_PATH_Type));
         const auto& physBinPath =
@@ -96,7 +98,7 @@ int convertFAPItoPELformat(
         {
             userData.emplace(prefix + "PHYS_PATH", physDevPath);
         }
-
+        */
         userData.emplace(prefix + "CLK_POS", std::to_string(hwCallout.clkPos));
         userData.emplace(prefix + "CALLOUT_PLANAR",
                          hwCallout.isPlanarCallout ? "true" : "false");
@@ -117,6 +119,8 @@ int convertFAPItoPELformat(
     {
         std::string prefix = std::format("HWP_CDG_TGT_{:02}_", ++calloutCount);
 
+        // TODO: this code need to be ported over to TARGETING
+        /*
         assert(cdg.target_entity_path.size() ==
                sizeof(ATTR_PHYS_BIN_PATH_Type));
         const auto& physBinPath =
@@ -139,7 +143,7 @@ int convertFAPItoPELformat(
         {
             userData.emplace(prefix + "PHYS_PATH", physDevPath);
         }
-
+        */
         userData.emplace(prefix + "CO_REQ", cdg.callout ? "true" : "false");
         userData.emplace(prefix + "CO_PRIORITY", cdg.callout_priority);
         userData.emplace(prefix + "DECONF_REQ",
@@ -153,13 +157,15 @@ int convertFAPItoPELformat(
                             {"GuardType", cdg.guard_type},
                             {"EntityPath", cdg.target_entity_path}};
 
+        // TODO: this code need to be ported over to TARGETING
+        /*
         ATTR_MRU_ID_Type mruId;
         if (DT_GET_PROP(ATTR_MRU_ID, *target, mruId) == 0)
         {
             calloutJson["MRUs"] = json::array(
                 {{{"ID", mruId}, {"Priority", calloutJson["Priority"]}}});
         }
-
+        */
         callout.emplace_back(std::move(calloutJson));
     }
 
