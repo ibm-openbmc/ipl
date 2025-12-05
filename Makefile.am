@@ -111,6 +111,7 @@ libphal_la_SOURCES = \
 	error/errl_factory.C \
 	error/errl_handle.C \
 	error/sbe_boot_failure.C \
+	error/sbe_hwp_failure.C \
 	error/sbe_error_helper.C \
 	error/sbe_nofunc_proc.C \
 	error/poz_sbe_chipop_failure.C \
