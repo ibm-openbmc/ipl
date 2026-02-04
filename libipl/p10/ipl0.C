@@ -448,7 +448,7 @@ static void process_guard_records()
 				if ((ipl_type() == IPL_TYPE_NORMAL) &&
 				    openpower::guard::isEphemeralType(
 					elem.errType)) {
-					openpower::guard::clear(elem.recordId);
+					openpower::guard::clear(elem.recordId, true);
 					targetinfo.set_hwas_state = true;
 				} else {
 					targetinfo.set_hwas_state = false;
