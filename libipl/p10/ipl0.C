@@ -1230,6 +1230,23 @@ static int ipl_sbe_config_update(void)
 			rc = 0;
 
 		ipl_process_fapi_error(fapirc, proc);
+		uint32_t val;
+		char path[16];
+		sprintf(path, "/proc%d/fsi", pdbg_target_index(proc));
+		struct pdbg_target *fsi = pdbg_target_from_path(NULL, path);
+		if (fsi) {
+			ipl_log(IPL_INFO, "Istep: Writing PCI Mem/IO\n");
+			if (fsi_read(fsi, 0x283F, &val)) {
+				ipl_log(IPL_ERROR, "Read of CFAM(0x283F) on %s failed",
+				pdbg_target_path(fsi));
+			}
+			//Enable PCI (31), pciMem(30), enable pciIO(29)
+			val |= 0x00000007;
+			if (fsi_write(fsi, 0x283F, val)) {
+				ipl_log(IPL_ERROR, "Write of CFAM(0x283F) on %s failed",
+				pdbg_target_path(fsi));
+			}
+		}
 		break;
 	}
 
